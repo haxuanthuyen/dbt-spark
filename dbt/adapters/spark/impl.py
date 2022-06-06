@@ -6,7 +6,15 @@ import agate
 from dbt.contracts.relation import RelationType
 
 import dbt
-import dbt.exceptions
+from dbt.exceptions import (
+    raise_database_error,
+    raise_compiler_error,
+    invalid_type_error,
+    get_relation_returned_multiple_results,
+    InternalException,
+    NotImplementedException,
+    RuntimeException,
+)
 
 from dbt.adapters.base import AdapterConfig
 from dbt.adapters.base.impl import catch_as_completed
@@ -18,6 +26,8 @@ from dbt.adapters.base import BaseRelation
 from dbt.clients.agate_helper import DEFAULT_TYPE_TESTER
 from dbt.events import AdapterLogger
 from dbt.utils import executor
+from dbt.adapters.base import Column as BaseColumn
+from dbt.adapters.base.meta import AdapterMeta, available
 
 logger = AdapterLogger("Spark")
 
@@ -153,13 +163,16 @@ class SparkAdapter(SQLAdapter):
                 if 'Type: VIEW' in information else RelationType.Table
             is_delta = 'Provider: delta' in information
             is_hudi = 'Provider: hudi' in information
+            # is_iceberg = 'Provider: iceberg' in information
+            is_iceberg = 'table_type=ICEBERG' in information
             relation = self.Relation.create(
-                schema=_schema,
+                schema=schema_relation.schema,
                 identifier=name,
                 type=rel_type,
                 information=information,
                 is_delta=is_delta,
                 is_hudi=is_hudi,
+                is_iceberg=is_iceberg,
             )
             relations.append(relation)
 
@@ -400,6 +413,40 @@ class SparkAdapter(SQLAdapter):
         finally:
             conn.transaction_open = False
 
+###
+    # Provided methods about relations
+    ###
+    @available.parse_list
+    def get_missing_columns(
+        self, from_relation: BaseRelation, to_relation: BaseRelation
+    ) -> List[BaseColumn]:
+        """Returns a list of Columns in from_relation that are missing from
+        to_relation.
+        """
+        if not isinstance(from_relation, self.Relation):
+            invalid_type_error(
+                method_name="get_missing_columns",
+                arg_name="from_relation",
+                got_value=from_relation,
+                expected_type=self.Relation,
+            )
+
+        if not isinstance(to_relation, self.Relation):
+            invalid_type_error(
+                method_name="get_missing_columns",
+                arg_name="to_relation",
+                got_value=to_relation,
+                expected_type=self.Relation,
+            )
+
+        from_columns = {col.name: col for col in self.get_columns_in_relation(from_relation)}
+
+        to_columns = {col.name: col for col in self.get_columns_in_relation(to_relation)}
+
+        missing_columns = set([k.lower() for k in from_columns.keys()]) - set([k.lower() for k in to_columns.keys()])
+        print("List missing column: " + str(missing_columns))
+
+        return [col for (col_name, col) in from_columns.items() if col_name in missing_columns]
 
 # spark does something interesting with joins when both tables have the same
 # static values for the join condition and complains that the join condition is

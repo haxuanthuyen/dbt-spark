@@ -15,7 +15,7 @@
 {% macro spark__snapshot_merge_sql(target, source, insert_cols) -%}
 
     merge into {{ target }} as DBT_INTERNAL_DEST
-    using {{ source }} as DBT_INTERNAL_SOURCE
+    using {{ source.identifier }} as DBT_INTERNAL_SOURCE
     on DBT_INTERNAL_SOURCE.dbt_scd_id = DBT_INTERNAL_DEST.dbt_scd_id
     when matched
      and DBT_INTERNAL_DEST.dbt_valid_to is null
@@ -66,6 +66,18 @@
     {% endif %}
 {% endmacro %}
 
+{% macro build_snapshot_table(strategy, sql) %}
+
+    select 'insert' dbt_change_type,*,
+        {{ strategy.scd_id }} as dbt_scd_id,
+        {{ strategy.updated_at }} as dbt_updated_at,
+        {{ strategy.updated_at }} as dbt_valid_from,
+        nullif({{ strategy.updated_at }}, {{ strategy.updated_at }}) as dbt_valid_to
+    from (
+        {{ sql }}
+    ) sbq
+
+{% endmacro %}
 
 {% materialization snapshot, adapter='spark' %}
   {%- set config = model['config'] -%}
@@ -82,18 +94,18 @@
           identifier=target_table,
           type='table') -%}
 
-  {%- if file_format not in ['delta', 'hudi'] -%}
+  {%- if file_format not in ['delta', 'hudi', 'iceberg'] -%}
     {% set invalid_format_msg -%}
       Invalid file format: {{ file_format }}
-      Snapshot functionality requires file_format be set to 'delta' or 'hudi'
+      Snapshot functionality requires file_format be set to 'delta' or 'hudi' or 'iceberg'
     {%- endset %}
     {% do exceptions.raise_compiler_error(invalid_format_msg) %}
   {% endif %}
 
   {%- if target_relation_exists -%}
-    {%- if not target_relation.is_delta and not target_relation.is_hudi -%}
+    {%- if not target_relation.is_delta and not target_relation.is_hudi and not target_relation.is_iceberg -%}
       {% set invalid_format_msg -%}
-        The existing table {{ model.schema }}.{{ target_table }} is in another format than 'delta' or 'hudi'
+        The existing table {{ model.schema }}.{{ target_table }} is in another format than 'delta' or 'hudi' or 'iceberg'
       {%- endset %}
       {% do exceptions.raise_compiler_error(invalid_format_msg) %}
     {% endif %}
@@ -135,6 +147,9 @@
                                    | rejectattr('name', 'equalto', 'dbt_unique_key')
                                    | rejectattr('name', 'equalto', 'DBT_UNIQUE_KEY')
                                    | list %}
+
+      {% set from_columns = adapter.get_columns_in_relation(staging_table) %}
+      {% set to_columns = adapter.get_columns_in_relation(target_relation) %}
 
       {% do create_columns(target_relation, missing_columns) %}
 

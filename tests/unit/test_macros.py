@@ -7,7 +7,7 @@ from jinja2 import Environment, FileSystemLoader
 class TestSparkMacros(unittest.TestCase):
 
     def setUp(self):
-        self.jinja_env = Environment(loader=FileSystemLoader('dbt/include/spark/macros'),
+        self.jinja_env = Environment(loader=FileSystemLoader('/Users/thuyenhx/Data/DATA/Projects/data-platform/dbt-spark-iceberg/dbt/include/spark/macros'),
                                      extensions=['jinja2.ext.do', ])
 
         self.config = {}
@@ -54,6 +54,10 @@ class TestSparkMacros(unittest.TestCase):
         sql = self.__run_macro(template, 'spark__create_table_as', False, 'my_table', 'select 1').strip()
         self.assertEqual(sql, "create table my_table using hudi as select 1")
 
+        self.config['file_format'] = 'iceberg'
+        sql = self.__run_macro(template, 'spark__create_table_as', False, 'my_table', 'select 1').strip()
+        self.assertEqual(sql, "create or replace table my_table using iceberg as select 1")
+
     def test_macros_create_table_as_options(self):
         template = self.__get_template('adapters.sql')
 
@@ -61,6 +65,11 @@ class TestSparkMacros(unittest.TestCase):
         self.config['options'] = {"compression": "gzip"}
         sql = self.__run_macro(template, 'spark__create_table_as', False, 'my_table', 'select 1').strip()
         self.assertEqual(sql, 'create or replace table my_table using delta options (compression "gzip" ) as select 1')
+
+        self.config['file_format'] = 'iceberg'
+        self.config['options'] = {"compression": "gzip"}
+        sql = self.__run_macro(template, 'spark__create_table_as', False, 'my_table', 'select 1').strip()
+        self.assertEqual(sql, 'create or replace table my_table using iceberg options (compression "gzip" ) as select 1')
 
         self.config['file_format'] = 'hudi'
         sql = self.__run_macro(template, 'spark__create_table_as', False, 'my_table', 'select 1').strip()
@@ -147,6 +156,20 @@ class TestSparkMacros(unittest.TestCase):
         self.assertEqual(
             sql,
             "create or replace table my_table using delta partitioned by (partition_1,partition_2) clustered by (cluster_1,cluster_2) into 1 buckets location '/mnt/root/my_table' comment 'Description Test' as select 1"
+        )
+
+        self.config['file_format'] = 'iceberg'
+        self.config['location_root'] = '/mnt/root'
+        self.config['partition_by'] = ['partition_1', 'partition_2']
+        self.config['clustered_by'] = ['cluster_1', 'cluster_2']
+        self.config['buckets'] = '1'
+        self.config['persist_docs'] = {'relation': True}
+        self.default_context['model'].description = 'Description Test'
+
+        sql = self.__run_macro(template, 'spark__create_table_as', False, 'my_table', 'select 1').strip()
+        self.assertEqual(
+            sql,
+            "create or replace table my_table using iceberg partitioned by (partition_1,partition_2) clustered by (cluster_1,cluster_2) into 1 buckets location '/mnt/root/my_table' comment 'Description Test' as select 1"
         )
 
         self.config['file_format'] = 'hudi'

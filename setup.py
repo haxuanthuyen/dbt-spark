@@ -51,8 +51,8 @@ def _get_dbt_core_version():
     return f"{minor}{pre}"
 
 
-package_name = "dbt-spark"
-package_version = "1.2.0a1"
+package_name = "dbt-spark-iceberg"
+package_version = "1.0.6"
 dbt_core_version = _get_dbt_core_version()
 description = """The Apache Spark adapter plugin for dbt"""
 

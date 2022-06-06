@@ -1,3 +1,14 @@
+{% macro dbt_spark_tblproperties_clause() -%}
+  {%- set tblproperties = config.get('tblproperties') -%}
+  {%- if tblproperties is not none %}
+    tblproperties (
+      {%- for prop in tblproperties -%}
+      '{{ prop }}' = '{{ tblproperties[prop] }}' {% if not loop.last %}, {% endif %}
+      {%- endfor %}
+    )
+  {%- endif %}
+{%- endmacro -%}
+
 {% macro file_format_clause() %}
   {{ return(adapter.dispatch('file_format_clause', 'dbt')()) }}
 {%- endmacro -%}
@@ -134,6 +145,8 @@
   {%- else -%}
     {% if config.get('file_format', validator=validation.any[basestring]) == 'delta' %}
       create or replace table {{ relation }}
+    {% elif config.get('file_format', validator=validation.any[basestring]) == 'iceberg' %}
+      create or replace table {{ relation }}
     {% else %}
       create table {{ relation }}
     {% endif %}
@@ -141,6 +154,7 @@
     {{ options_clause() }}
     {{ partition_cols(label="partitioned by") }}
     {{ clustered_cols(label="clustered by") }}
+    {{ dbt_spark_tblproperties_clause() }}
     {{ location_clause() }}
     {{ comment_clause() }}
     as
@@ -226,12 +240,12 @@
 {% endmacro %}
 
 {% macro spark__alter_column_comment(relation, column_dict) %}
-  {% if config.get('file_format', validator=validation.any[basestring]) in ['delta', 'hudi'] %}
+  {% if config.get('file_format', validator=validation.any[basestring]) in ['delta', 'hudi', 'iceberg'] %}
     {% for column_name in column_dict %}
       {% set comment = column_dict[column_name]['description'] %}
       {% set escaped_comment = comment | replace('\'', '\\\'') %}
       {% set comment_query %}
-        alter table {{ relation }} change column 
+        alter table {{ relation }} alter column
             {{ adapter.quote(column_name) if column_dict[column_name]['quote'] else column_name }}
             comment '{{ escaped_comment }}';
       {% endset %}
@@ -265,7 +279,12 @@
     {% set platform_name = 'Delta Lake' if relation.is_delta else 'Apache Spark' %}
     {{ exceptions.raise_compiler_error(platform_name + ' does not support dropping columns from tables') }}
   {% endif %}
-  
+
+  {% if remove_columns %}
+    {% set platform_name = 'Iceberg' if relation.is_iceberg else 'Apache Spark' %}
+    {{ exceptions.raise_compiler_error(platform_name + ' does not support dropping columns from tables') }}
+  {% endif %}
+
   {% if add_columns is none %}
     {% set add_columns = [] %}
   {% endif %}
