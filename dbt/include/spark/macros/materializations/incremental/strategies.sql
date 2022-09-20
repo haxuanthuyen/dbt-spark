@@ -1,8 +1,11 @@
 {% macro get_insert_overwrite_sql(source_relation, target_relation) %}
-    
+    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
+    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+    {%- set catalog_relation_name = catalog_name + '.' + target_relation.schema + '.' + target_relation.identifier -%}
+
     {%- set dest_columns = adapter.get_columns_in_relation(target_relation) -%}
     {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
-    insert overwrite table {{ target_relation }}
+    insert overwrite table {{ catalog_relation_name }}
     {{ partition_cols(label="partition") }}
     select {{dest_cols_csv}} from {{ source_relation.include(database=false, schema=false) }}
 
@@ -10,16 +13,23 @@
 
 
 {% macro get_insert_into_sql(source_relation, target_relation) %}
+    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
+    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+    {%- set catalog_relation_name = catalog_name + '.' + target_relation.schema + '.' + target_relation.identifier -%}
 
     {%- set dest_columns = adapter.get_columns_in_relation(target_relation) -%}
     {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
-    insert into table {{ target_relation }}
+    insert into table {{ catalog_relation_name }}
     select {{dest_cols_csv}} from {{ source_relation.include(database=false, schema=false) }}
 
 {% endmacro %}
 
 
 {% macro spark__get_merge_sql(target, source, unique_key, dest_columns, predicates=none) %}
+  {%- set catalog_type = config.get('catalog_type', 'hive') -%}
+  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+  {%- set catalog_relation_name = catalog_name + '.' + target.schema + '.' + target.identifier -%}
+
   {# skip dest_columns, use merge_update_columns config if provided, otherwise use "*" #}
   {%- set predicates = [] if predicates is none else [] + predicates -%}
   {%- set update_columns = config.get("merge_update_columns") -%}
@@ -44,7 +54,7 @@
   
   {{ sql_header if sql_header is not none }}
   
-  merge into {{ target }} as DBT_INTERNAL_DEST
+  merge into {{ catalog_relation_name }} as DBT_INTERNAL_DEST
       using {{ source.include(schema=false) }} as DBT_INTERNAL_SOURCE
       on {{ predicates | join(' and ') }}
       

@@ -14,6 +14,11 @@
   
   {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
 
+  {%- set catalog_type = config.get('catalog_type', 'hive') -%}
+  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+  {%- set catalog_relation_name = catalog_name + '.' + this.schema + '.' + this.identifier -%}
+  {% do log("catalog_relation_name: " ~  catalog_relation_name, info=True) %}
+
   {% set target_relation = this %}
   {% set existing_relation = load_relation(this) %}
   {% set tmp_relation = make_temp_relation(this) %}
@@ -27,15 +32,19 @@
   {{ run_hooks(pre_hooks) }}
 
   {% if existing_relation is none %}
-    {% set build_sql = create_table_as(False, target_relation, sql) %}
+    {% set build_sql = create_table_as(False, catalog_relation_name, sql) %}
+    {{ switch_catalog_create_table_hive(sql) }}
   {% elif existing_relation.is_view or full_refresh_mode %}
     {% do adapter.drop_relation(existing_relation) %}
-    {% set build_sql = create_table_as(False, target_relation, sql) %}
+    {% set build_sql = create_table_as(False, catalog_relation_name, sql) %}
+    {{ switch_catalog_create_table_hive(sql) }}
   {% else %}
     {% do run_query(create_table_as(True, tmp_relation, sql)) %}
     {% do process_schema_changes(on_schema_change, tmp_relation, existing_relation) %}
     {% set build_sql = dbt_spark_get_incremental_sql(strategy, tmp_relation, target_relation, unique_key) %}
   {% endif %}
+
+
 
   {%- call statement('main') -%}
     {{ build_sql }}

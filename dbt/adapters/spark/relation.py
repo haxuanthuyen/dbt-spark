@@ -2,6 +2,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 from dbt.adapters.base.relation import BaseRelation, Policy
+from dbt.contracts.relation import RelationType
 from dbt.exceptions import RuntimeException
 from dbt.events import AdapterLogger
 logger = AdapterLogger("Spark")
@@ -95,3 +96,23 @@ class SparkRelation(BaseRelation):
                 'include, but only one can be set'
             )
         return super().render()
+
+    # def create(
+    #     cls: Type[Self],
+    #     database: Optional[str] = None,
+    #     schema: Optional[str] = None,
+    #     identifier: Optional[str] = None,
+    #     type: Optional[RelationType] = None,
+    #     **kwargs,
+    # ) -> Self:
+    #     kwargs.update(
+    #         {
+    #             "path": {
+    #                 "database": database,
+    #                 "schema": schema,
+    #                 "identifier": identifier,
+    #             },
+    #             "type": type,
+    #         }
+    #     )
+    #     return cls.from_dict(kwargs)

@@ -34,7 +34,7 @@
     {% set tmp_identifier = target_relation.identifier ~ '__dbt_tmp' %}
                                 
     {%- set tmp_relation = api.Relation.create(identifier=tmp_identifier,
-                                                  schema=target_relation.schema,
+                                                  schema=none,
                                                   database=none,
                                                   type='view') -%}
 
@@ -55,14 +55,28 @@
 
 
 {% macro spark__create_columns(relation, columns) %}
+    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
+    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+    {%- set relation_name = catalog_name + '.' + relation.schema + '.' + relation.identifier -%}
+    {%- set default_relation_name =  'spark_catalog.' + relation.schema + '.' + relation.identifier -%}
+
     {% if columns|length > 0 %}
     {% call statement() %}
-      alter table {{ relation }} add columns (
+      alter table {{ relation_name }} add columns (
         {% for column in columns %}
           `{{ column.name }}` {{ column.data_type }} {{- ',' if not loop.last -}}
         {% endfor %}
       );
     {% endcall %}
+    {% if catalog_type == 'hadoop' %}
+        {% call statement() %}
+          alter table {{ default_relation_name }} add columns (
+            {% for column in columns %}
+              `{{ column.name }}` {{ column.data_type }} {{- ',' if not loop.last -}}
+            {% endfor %}
+          );
+        {% endcall %}
+    {% endif %}
     {% endif %}
 {% endmacro %}
 
@@ -87,12 +101,17 @@
   {%- set strategy_name = config.get('strategy') -%}
   {%- set unique_key = config.get('unique_key') %}
   {%- set file_format = config.get('file_format', 'parquet') -%}
+  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+  {%- set catalog_schema = catalog_name + '.' + model.schema  -%}
 
   {% set target_relation_exists, target_relation = get_or_create_relation(
           database=none,
           schema=model.schema,
           identifier=target_table,
           type='table') -%}
+
+  {%- set catalog_target_relation = catalog_name + '.' + target_relation.schema + '.' + target_table -%}
+  {% do log("catalog_target_relation: " ~  catalog_target_relation, info=True) %}
 
   {%- if file_format not in ['delta', 'hudi', 'iceberg'] -%}
     {% set invalid_format_msg -%}
@@ -129,7 +148,9 @@
   {% if not target_relation_exists %}
 
       {% set build_sql = build_snapshot_table(strategy, model['compiled_sql']) %}
-      {% set final_sql = create_table_as(False, target_relation, build_sql) %}
+      {% set final_sql = create_table_as(False, catalog_target_relation, build_sql) %}
+
+      {{ switch_catalog_create_table_hive(build_sql) }}
 
   {% else %}
 
@@ -166,7 +187,7 @@
       {% endfor %}
 
       {% set final_sql = snapshot_merge_sql(
-            target = target_relation,
+            target = catalog_target_relation,
             source = staging_table,
             insert_cols = quoted_source_columns
          )

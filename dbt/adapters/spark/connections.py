@@ -192,7 +192,12 @@ class PyhiveConnectionWrapper(object):
                 logger.debug(
                     "Exception while closing cursor: {}".format(exc)
                 )
-        self.handle.close()
+        # try:
+        #     self.handle.close()
+        # except EnvironmentError as exc:
+        #     logger.debug(
+        #         "Exception while closing cursor: {}".format(exc)
+        #     )
 
     def rollback(self, *args, **kwargs):
         logger.debug("NotImplemented: rollback")

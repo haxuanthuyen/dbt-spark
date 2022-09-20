@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, Union, Iterable
 import agate
 from dbt.contracts.relation import RelationType
+from dbt.events.types import ListRelations
+from dbt.adapters.cache import RelationsCache, _make_key
+from dbt.events.functions import fire_event
 
 import dbt
 from dbt.exceptions import (
@@ -165,6 +168,7 @@ class SparkAdapter(SQLAdapter):
             is_hudi = 'Provider: hudi' in information
             # is_iceberg = 'Provider: iceberg' in information
             is_iceberg = 'table_type=ICEBERG' in information
+
             relation = self.Relation.create(
                 schema=schema_relation.schema,
                 identifier=name,
@@ -178,13 +182,23 @@ class SparkAdapter(SQLAdapter):
 
         return relations
 
-    def get_relation(
-        self, database: str, schema: str, identifier: str
-    ) -> Optional[BaseRelation]:
-        if not self.Relation.include_policy.database:
-            database = None
-
-        return super().get_relation(database, schema, identifier)
+    # def get_relation(self, database: str, schema: str, identifier: str) -> Optional[BaseRelation]:
+    #     relations_list = self.list_relations(database, schema)
+    #
+    #     matches = self._make_match(relations_list, database, schema, identifier)
+    #
+    #     if len(matches) > 1:
+    #         kwargs = {
+    #             "identifier": identifier,
+    #             "schema": schema,
+    #             "database": database,
+    #         }
+    #         get_relation_returned_multiple_results(kwargs, matches)
+    #
+    #     elif matches:
+    #         return matches[0]
+    #
+    #     return None
 
     def parse_describe_extended(
             self,
