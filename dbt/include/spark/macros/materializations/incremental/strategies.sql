@@ -24,52 +24,47 @@
 
 {% endmacro %}
 
+{#--using default get_merge_sql instead of implimentation from dbt_spark adapter--#}
+{% macro get_merge_sql(target, source, unique_key, dest_columns, predicates) -%}
 
-{% macro spark__get_merge_sql(target, source, unique_key, dest_columns, predicates=none) %}
-  {%- set catalog_type = config.get('catalog_type', 'hive') -%}
-  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-  {%- set catalog_relation_name = catalog_name + '.' + target.schema + '.' + target.identifier -%}
+    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
+    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
+    {%- set catalog_relation_name = catalog_name + '.' + target.schema + '.' + target.identifier -%}
 
-  {# skip dest_columns, use merge_update_columns config if provided, otherwise use "*" #}
-  {%- set predicates = [] if predicates is none else [] + predicates -%}
-  {%- set update_columns = config.get("merge_update_columns") -%}
+    {%- set predicates = [] if predicates is none else predicates.split("@$") -%}
+    {%- set update_columns = config.get('merge_update_columns', default = dest_columns | map(attribute="quoted") | list) -%}
+    {%- set sql_header = config.get('sql_header', none) -%}
 
-  {% if unique_key %}
-      {% if unique_key is sequence and unique_key is not mapping and unique_key is not string %}
-          {% for key in unique_key %}
-              {% set this_key_match %}
-                  DBT_INTERNAL_SOURCE.{{ key }} = DBT_INTERNAL_DEST.{{ key }}
-              {% endset %}
-              {% do predicates.append(this_key_match) %}
-          {% endfor %}
-      {% else %}
-          {% set unique_key_match %}
-              DBT_INTERNAL_SOURCE.{{ unique_key }} = DBT_INTERNAL_DEST.{{ unique_key }}
-          {% endset %}
-          {% do predicates.append(unique_key_match) %}
-      {% endif %}
-  {% else %}
-      {% do predicates.append('FALSE') %}
-  {% endif %}
-  
-  {{ sql_header if sql_header is not none }}
-  
-  merge into {{ catalog_relation_name }} as DBT_INTERNAL_DEST
-      using {{ source.include(schema=false) }} as DBT_INTERNAL_SOURCE
-      on {{ predicates | join(' and ') }}
-      
-      when matched then update set
-        {% if update_columns -%}{%- for column_name in update_columns %}
-            {{ column_name }} = DBT_INTERNAL_SOURCE.{{ column_name }}
-            {%- if not loop.last %}, {%- endif %}
-        {%- endfor %}
+    {% if unique_key %}
+        {% set unique_key_match %}
+            DBT_INTERNAL_SOURCE.{{ unique_key }} = DBT_INTERNAL_DEST.{{ unique_key }}
+        {% endset %}
+        {% do predicates.append(unique_key_match) %}
+    {% else %}
+        {% do predicates.append('FALSE') %}
+    {% endif %}
+
+    {{ sql_header if sql_header is not none }}
+
+    merge into {{ catalog_relation_name }} as DBT_INTERNAL_DEST
+        using {{ source.include(schema=false) }} as DBT_INTERNAL_SOURCE
+        on {{ predicates | join(' and ') }}
+
+    {% if unique_key %}
+    when matched then update set
+        {% if update_columns -%}
+          {% for column_name in update_columns -%}
+              {{ column_name }} = DBT_INTERNAL_SOURCE.{{ column_name }}
+              {%- if not loop.last %}, {%- endif %}
+          {%- endfor %}
         {%- else %} * {% endif %}
-    
-      when not matched then insert *
+    {% endif %}
+
+    when not matched then insert *
+
 {% endmacro %}
 
-
-{% macro dbt_spark_get_incremental_sql(strategy, source, target, unique_key) %}
+{% macro dbt_spark_get_incremental_sql(strategy, source, target, unique_key, predicates) %}
   {%- if strategy == 'append' -%}
     {#-- insert new records into existing table, without updating or overwriting #}
     {{ get_insert_into_sql(source, target) }}
@@ -77,8 +72,11 @@
     {#-- insert statements don't like CTEs, so support them via a temp view #}
     {{ get_insert_overwrite_sql(source, target) }}
   {%- elif strategy == 'merge' -%}
-  {#-- merge all columns with databricks delta or iceberg - schema changes are handled for us #}
-    {{ get_merge_sql(target, source, unique_key, dest_columns=none, predicates=none) }}
+  {#-- merge all columns with databricks delta - schema changes are handled for us #}
+  {#-- set dest_columns = none to avoid error with default value when call get_merge_sql #}
+  {% set dest_columns = none %}
+
+    {{ get_merge_sql(target, source, unique_key, dest_columns, predicates) }}
   {%- else -%}
     {% set no_sql_for_strategy_msg -%}
       No known SQL for the incremental strategy provided: {{ strategy }}

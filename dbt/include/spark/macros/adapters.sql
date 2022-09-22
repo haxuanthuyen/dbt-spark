@@ -144,9 +144,9 @@
     {{ create_temporary_view(relation, sql) }}
   {%- else -%}
     {% if config.get('file_format', validator=validation.any[basestring]) == 'delta' %}
-      create or replace table {{ relation }}
+      create table {{ relation }}
     {% elif config.get('file_format', validator=validation.any[basestring]) == 'iceberg' %}
-      create or replace table {{ relation }}
+      create table {{ relation }}
     {% else %}
       create table {{ relation }}
     {% endif %}
@@ -171,9 +171,11 @@
 {% endmacro %}
 
 {% macro spark__create_schema(relation) -%}
-  {%- call statement('create_schema') -%}
-    create schema if not exists {{relation}}
-  {% endcall %}
+  {% if (relation.without_identifier() | upper != 'GLOBAL_TEMP') and relation.without_identifier() | upper | truncate(5, True, '') != '"DP".' %}
+    {%- call statement('create_schema') -%}
+        create schema if not exists {{ relation.without_identifier() }}
+    {% endcall %}
+  {% endif %}
 {% endmacro %}
 
 {% macro spark__drop_schema(relation) -%}
@@ -191,7 +193,19 @@
 
 {% macro spark__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
-    show table extended in {{ relation }} like '*'
+    {% set str_relation = relation|string %}
+    {% if (str_relation.split(".")|length < 3)
+        and not str_relation.startswith('omre.')
+        and not str_relation.startswith('omc.')
+        and not str_relation.startswith('omd.')
+        and not str_relation.startswith('om.')
+        and not str_relation.startswith('dfs.')
+        and not str_relation.startswith('dp.') %}
+        show table extended in {{ relation }} like '{{ var("relation_list", "*")}}'
+    {%- else -%}
+        {% do log("it is dremio schema: " ~  str_relation, info=True) %}
+        show table extended in default like '{{ var("relation_list", "*")}}'
+    {%- endif %}
   {% endcall %}
 
   {% do return(load_result('list_relations_without_caching').table) %}

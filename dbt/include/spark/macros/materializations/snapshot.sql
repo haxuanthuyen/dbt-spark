@@ -12,11 +12,15 @@
 {%- endmacro %}
 
 
-{% macro spark__snapshot_merge_sql(target, source, insert_cols) -%}
-
+{% macro spark__snapshot_merge_sql(target, source, insert_cols, predicates) -%}
+    {#--add parameter predicates to pass partition filter--#}
+    {% do log("INFO: using spark__snapshot_merge_sql"  , info=True) %}
     merge into {{ target }} as DBT_INTERNAL_DEST
     using {{ source.identifier }} as DBT_INTERNAL_SOURCE
     on DBT_INTERNAL_SOURCE.dbt_scd_id = DBT_INTERNAL_DEST.dbt_scd_id
+    {% if predicates is not none %}
+        and {{ predicates }}
+    {% endif%}
     when matched
      and DBT_INTERNAL_DEST.dbt_valid_to is null
      and DBT_INTERNAL_SOURCE.dbt_change_type in ('update', 'delete')
@@ -27,25 +31,6 @@
      and DBT_INTERNAL_SOURCE.dbt_change_type = 'insert'
         then insert *
     ;
-{% endmacro %}
-
-
-{% macro spark_build_snapshot_staging_table(strategy, sql, target_relation) %}
-    {% set tmp_identifier = target_relation.identifier ~ '__dbt_tmp' %}
-                                
-    {%- set tmp_relation = api.Relation.create(identifier=tmp_identifier,
-                                                  schema=none,
-                                                  database=none,
-                                                  type='view') -%}
-
-    {% set select = snapshot_staging_table(strategy, sql, target_relation) %}
-
-    {# needs to be a non-temp view so that its columns can be ascertained via `describe` #}
-    {% call statement('build_snapshot_staging_relation') %}
-        {{ create_view_as(tmp_relation, select) }}
-    {% endcall %}
-
-    {% do return(tmp_relation) %}
 {% endmacro %}
 
 
@@ -138,6 +123,11 @@
     {% do exceptions.relation_wrong_type(target_relation, 'table') %}
   {%- endif -%}
 
+  {#-------------- disable autoMerge for snapshot model----------#}
+  {% call statement() %}
+      set spark.databricks.delta.schema.autoMerge.enabled = false
+  {% endcall %}
+
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
 
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
@@ -153,10 +143,32 @@
       {{ switch_catalog_create_table_hive(build_sql) }}
 
   {% else %}
+      {#--begin get list parrtition here --#}
+
+      {%- set partition_by = config.get('partition_by') -%}
+      {%- set source_partition_column = config.get('source_partition_column') -%}
+      {%- set source_staging_table = config.get('source_staging_table') -%}
+      {% if source_partition_column and source_staging_table %}
+
+        {% set list_partition = get_date_partition_list(source_staging_table, source_partition_column) %}
+
+        {% if list_partition %}
+            {#--build condition filter on merge--#}
+            {% set  predicates_stage = partition_by[0] + " IN (" + list_partition + ")" %}
+            {% set  predicates_merge = "DBT_INTERNAL_DEST." + partition_by[0] + " IN (" + list_partition + ")" %}
+        {% else %}
+            {% set  predicates_stage = none %}
+            {% set  predicates_merge = none %}
+        {% endif %}
+      {% else %}
+        {% set  predicates_stage = none %}
+        {% set  predicates_merge = none %}
+      {% endif %}
+      {#--end get list parrtition here --#}
 
       {{ adapter.valid_snapshot_target(target_relation) }}
 
-      {% set staging_table = spark_build_snapshot_staging_table(strategy, sql, target_relation) %}
+      {% set staging_table = spark_build_snapshot_staging_table(strategy, sql, target_relation, predicates_stage) %}
 
       -- this may no-op if the database does not require column expansion
       {% do adapter.expand_target_column_types(from_relation=staging_table,
@@ -186,12 +198,22 @@
         {% do quoted_source_columns.append(adapter.quote(column.name)) %}
       {% endfor %}
 
-      {% set final_sql = snapshot_merge_sql(
-            target = catalog_target_relation,
-            source = staging_table,
-            insert_cols = quoted_source_columns
-         )
-      %}
+      {#-- check if source table has data or not#}
+      {% set has_data = get_scalar_value_from_query(query = 'select 1 as flag from ' ~ staging_table ~ ' limit 1') %}
+        {% if has_data == none or has_data == '' %}
+            {#--ignore merge when source dont have data #}
+            {% do log("debug: do not have data to merge" , info = True)%}
+            {% set  final_sql = 'select 1 ' %}
+        {% else %}
+            {#--add parameter predicates to pass partition filter--#}
+            {% set final_sql = spark__snapshot_merge_sql(
+                    target = target_relation,
+                    source = staging_table,
+                    insert_cols = quoted_source_columns,
+                    predicates = predicates_merge
+                )
+            %}
+        {% endif %}
 
   {% endif %}
 
