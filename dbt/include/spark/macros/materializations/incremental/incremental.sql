@@ -17,16 +17,14 @@
 
   {%- set full_refresh_mode = (flags.FULL_REFRESH == True) -%}
 
-  {%- set catalog_type = config.get('catalog_type', 'hive') -%}
-  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-  {%- set catalog_relation_name = catalog_name + '.' + this.schema + '.' + this.identifier -%}
-  {% do log("catalog_relation_name: " ~  catalog_relation_name, info=True) %}
+  {%- set catalog_relation_name = get_catalog_relation_name(this) -%}
 
   {%- set catalog_target_relation = api.Relation.create(identifier=this.identifier,
-                                                schema=catalog_name + '.' + this.schema,
+                                                schema=catalog_relation_name,
                                                 database=database,
                                                 type='table') -%}
 
+  {% do log("catalog_relation_name: " ~  catalog_target_relation, info=True) %}
   {% set target_relation = this %}
   {% set existing_relation = load_relation(this) %}
   {% set tmp_relation = make_temp_relation(this) %}
@@ -40,12 +38,12 @@
   {{ run_hooks(pre_hooks) }}
 
   {% if existing_relation is none %}
-    {% set build_sql = create_table_as(False, catalog_relation_name, sql) %}
+    {% set build_sql = create_table_as(False, catalog_target_relation, sql) %}
     {{ switch_catalog_create_table_hive(sql) }}
   {% elif existing_relation.is_view or full_refresh_mode %}
     {% do adapter.drop_relation(existing_relation) %}
     {% do adapter.drop_relation(catalog_target_relation) %}
-    {% set build_sql = create_table_as(False, catalog_relation_name, sql) %}
+    {% set build_sql = create_table_as(False, catalog_target_relation, sql) %}
     {{ switch_catalog_create_table_hive(sql) }}
   {% else %}
     {% do run_query(create_table_as(True, tmp_relation, sql)) %}
@@ -63,7 +61,7 @@
       {% endif %}
 
       {% if source_partition_column is not none %}
-        {% set list_partition = get_date_partition_list (tmp_relation.include(schema=false),source_partition_column) %}
+        {% set list_partition = get_date_partition_list(tmp_relation.include(schema=false),source_partition_column) %}
         {% if list_partition %}
           {#--build condition filter on merge--#}
           {% set  predicates = "DBT_INTERNAL_DEST." + partition_by[0] + " IN (" + list_partition + ")" %}

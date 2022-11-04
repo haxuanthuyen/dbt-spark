@@ -1,7 +1,5 @@
 {% macro get_insert_overwrite_sql(source_relation, target_relation) %}
-    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
-    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-    {%- set catalog_relation_name = catalog_name + '.' + target_relation.schema + '.' + target_relation.identifier -%}
+    {%- set catalog_relation_name = get_catalog_relation_name(target_relation) -%}
 
     {%- set dest_columns = adapter.get_columns_in_relation(target_relation) -%}
     {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
@@ -13,9 +11,7 @@
 
 
 {% macro get_insert_into_sql(source_relation, target_relation) %}
-    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
-    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-    {%- set catalog_relation_name = catalog_name + '.' + target_relation.schema + '.' + target_relation.identifier -%}
+    {%- set catalog_relation_name = get_catalog_relation_name(target_relation) -%}
 
     {%- set dest_columns = adapter.get_columns_in_relation(target_relation) -%}
     {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
@@ -27,9 +23,7 @@
 {#--using default get_merge_sql instead of implimentation from dbt_spark adapter--#}
 {% macro get_merge_sql(target, source, unique_key, dest_columns, predicates) -%}
 
-    {%- set catalog_type = config.get('catalog_type', 'hive') -%}
-    {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-    {%- set catalog_relation_name = catalog_name + '.' + target.schema + '.' + target.identifier -%}
+    {%- set catalog_relation_name = get_catalog_relation_name(target) -%}
 
     {%- set predicates = [] if predicates is none else predicates.split("@$") -%}
     {%- set update_columns = config.get('merge_update_columns', default = dest_columns | map(attribute="quoted") | list) -%}

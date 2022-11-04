@@ -32,9 +32,7 @@
 {% endmaterialization %}
 
 {% macro dbt_common_create_table_as(temporary, relation, sql) -%}
-  {%- set catalog_type = config.get('catalog_type', 'hive') -%}
-  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-  {%- set catalog_relation_name = catalog_name + '.' + relation.schema + '.' + relation.identifier -%}
+  {%- set catalog_relation_name = get_catalog_relation_name(relation) -%}
   {% do log("catalog_relation_name: " ~  catalog_relation_name, info=True) %}
 
   {% if temporary -%}

@@ -86,8 +86,6 @@
   {%- set strategy_name = config.get('strategy') -%}
   {%- set unique_key = config.get('unique_key') %}
   {%- set file_format = config.get('file_format', 'parquet') -%}
-  {%- set catalog_name = config.get('catalog_name', 'spark_catalog') -%}
-  {%- set catalog_schema = catalog_name + '.' + model.schema  -%}
 
   {% set target_relation_exists, target_relation = get_or_create_relation(
           database=none,
@@ -95,7 +93,7 @@
           identifier=target_table,
           type='table') -%}
 
-  {%- set catalog_target_relation = catalog_name + '.' + target_relation.schema + '.' + target_table -%}
+  {%- set catalog_target_relation = get_catalog_relation_name(target_relation) -%}
   {% do log("catalog_target_relation: " ~  catalog_target_relation, info=True) %}
 
   {%- if file_format not in ['delta', 'hudi', 'iceberg'] -%}
@@ -138,7 +136,7 @@
   {% if not target_relation_exists %}
 
       {% set build_sql = build_snapshot_table(strategy, model['compiled_sql']) %}
-      {% set final_sql = create_table_as(False, catalog_target_relation, build_sql) %}
+      {% set final_sql = create_table_as(False, target_relation, build_sql) %}
 
       {{ switch_catalog_create_table_hive(build_sql) }}
 
@@ -207,7 +205,7 @@
         {% else %}
             {#--add parameter predicates to pass partition filter--#}
             {% set final_sql = spark__snapshot_merge_sql(
-                    target = target_relation,
+                    target = catalog_target_relation,
                     source = staging_table,
                     insert_cols = quoted_source_columns,
                     predicates = predicates_merge

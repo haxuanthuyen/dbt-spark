@@ -1,6 +1,9 @@
 {% macro spark__snapshot_staging_table(strategy, source_sql, target_relation, predicates) -%}
     {% do log("INFO: using dbt_common snapshot_staging_table"  , info=True) %}
 
+    {%- set catalog_relation_name = get_catalog_relation_name(target_relation) -%}
+    {% do log("spark__snapshot_staging_table catalog_relation_name: " ~ catalog_relation_name, info=True) %}
+
     with snapshot_query as (
 
         {{ source_sql }}
@@ -12,7 +15,7 @@
         select *,
             {{ strategy.unique_key }} as dbt_unique_key
 
-        from {{ target_relation }}
+        from {{ catalog_relation_name }}
         where dbt_valid_to is null
         {#--add partition filter here ---#}
         {% if predicates is not none %}

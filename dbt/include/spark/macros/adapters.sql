@@ -140,15 +140,18 @@
 
 
 {% macro spark__create_table_as(temporary, relation, sql) -%}
+
+  {%- set catalog_relation_name = get_catalog_relation_name(relation) -%}
+
   {% if temporary -%}
     {{ create_temporary_view(relation, sql) }}
   {%- else -%}
     {% if config.get('file_format', validator=validation.any[basestring]) == 'delta' %}
-      create table {{ relation }}
+      create table {{ catalog_relation_name }}
     {% elif config.get('file_format', validator=validation.any[basestring]) == 'iceberg' %}
-      create table {{ relation }}
+      create table {{ catalog_relation_name }}
     {% else %}
-      create table {{ relation }}
+      create table {{ catalog_relation_name }}
     {% endif %}
     {{ file_format_clause() }}
     {{ options_clause() }}
@@ -171,6 +174,13 @@
 {% endmacro %}
 
 {% macro spark__create_schema(relation) -%}
+  {% set str_schema = relation.without_identifier()|string %}
+
+  {%- set schema_name = str_schema -%}
+  {% if str_schema.split('.')|length > 1 -%}
+    {%- set schema_name = str_schema.split('.')[1] -%}
+  {%- endif %}
+
   {% if (relation.without_identifier() | upper != 'GLOBAL_TEMP') and relation.without_identifier() | upper | truncate(5, True, '') != '"DP".' %}
     {%- call statement('create_schema') -%}
         create schema if not exists {{ relation.without_identifier() }}
@@ -201,7 +211,12 @@
         and not str_relation.startswith('om.')
         and not str_relation.startswith('dfs.')
         and not str_relation.startswith('dp.') %}
-        show table extended in {{ relation }} like '{{ var("relation_list", "*")}}'
+
+        {%- set schema_name = relation.schema -%}
+        {% if relation.schema.split('.')|length > 1 -%}
+            {%- set schema_name = relation.schema.split('.')[1] -%}
+        {%- endif %}
+        show table extended in {{ schema_name }} like '{{ var("relation_list", "*")}}'
     {%- else -%}
         {% do log("it is dremio schema: " ~  str_relation, info=True) %}
         show table extended in default like '{{ var("relation_list", "*")}}'
